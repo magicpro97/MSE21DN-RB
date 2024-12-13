@@ -54,5 +54,24 @@ def remove_background_video():
     os.remove(temp_input)
     return send_file(temp_output, mimetype='video/mp4')
 
+@app.route('/remove-background/frame', methods=['POST'])
+def remove_background_frame():
+    # Nhận khung hình từ front-end
+    if 'frame' not in request.files:
+        return "No frame provided", 400
+
+    frame_file = request.files['frame']
+    image = Image.open(frame_file)
+
+    # Xóa nền
+    result = remove(image)
+
+    # Chuẩn bị ảnh để trả về
+    output = io.BytesIO()
+    result.save(output, format="PNG")
+    output.seek(0)
+
+    return send_file(output, mimetype='image/png')
+
 if __name__ == '__main__':
     app.run(debug=True)
