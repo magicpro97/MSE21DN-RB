@@ -1,0 +1,6 @@
+numpy
+Flask
+pillow
+onnxruntime
+rembg
+opencv-python
