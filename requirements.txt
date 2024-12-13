@@ -4,3 +4,4 @@ pillow
 onnxruntime
 rembg
 opencv-python
+Flask-SocketIO

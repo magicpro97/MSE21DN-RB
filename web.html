@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remove Background Realtime</title>
+</head>
+<body>
+    <h1>Realtime Background Removal</h1>
+    <video id="video" autoplay></video>
+    <canvas id="canvas" style="display:none;"></canvas>
+    <img id="output" alt="Processed frame will appear here">
+    <input type="file" id="backgroundInput" accept="image/*">
+    <button id="download">Download Processed Video</button>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.js"></script>
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const output = document.getElementById('output');
+        const backgroundInput = document.getElementById('backgroundInput');
+        const downloadButton = document.getElementById('download');
+        const ctx = canvas.getContext('2d');
+
+        const socket = io('http://127.0.0.1:5000'); // Kết nối WebSocket
+
+        // Tải video từ webcam
+        async function startVideo() {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+        }
+
+        // Gửi khung hình qua WebSocket
+        async function sendFrame() {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+
+            // Vẽ khung hình hiện tại vào canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Chuyển khung hình thành Blob
+            canvas.toBlob((blob) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    socket.emit('frame', { frame: reader.result });
+                };
+                reader.readAsArrayBuffer(blob);
+            }, 'image/png');
+        }
+
+        // Lắng nghe khung hình đã xử lý từ server
+        socket.on('processed_frame', (data) => {
+            const blob = new Blob([data], { type: 'image/png' });
+            output.src = URL.createObjectURL(blob);
+        });
+
+        // Gửi background tùy chỉnh
+        backgroundInput.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            const formData = new FormData();
+            formData.append('background', file);
+
+            await fetch('http://127.0.0.1:5000/upload-background', {
+                method: 'POST',
+                body: formData,
+            });
+            alert('Background uploaded successfully');
+        });
+
+        // Tải video đã xử lý
+        downloadButton.addEventListener('click', () => {
+            window.location.href = 'http://127.0.0.1:5000/download-video';
+        });
+
+        // Xử lý video stream
+        video.addEventListener('play', () => {
+            setInterval(() => {
+                sendFrame();
+            }, 50); // Điều chỉnh tốc độ gửi
+        });
+
+        // Bắt đầu
+        startVideo();
+    </script>
+</body>
+</html>
