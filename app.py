@@ -1,12 +1,13 @@
 import os
 
-from flask import Flask, send_file, request, jsonify
+from flask import Flask, send_file, request, jsonify, render_template
 from flask_socketio import SocketIO, emit
 from rembg import remove
 from PIL import Image, ImageOps
 import cv2
 import numpy as np
 import io
+import base64
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")  # Kích hoạt WebSocket
@@ -15,38 +16,74 @@ background_image = None
 output_video_path = "output_video.mp4"
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 video_writer = None
+frame_index = 0
+fps = 20
 
+# Default page route
+@app.route('/')
+def index():
+    return render_template('web.html')
+
+@socketio.on('reset')
+def reset_video():
+    global video_writer
+    if video_writer is not None:
+        video_writer.release()
+        video_writer = None
+    if os.path.exists(output_video_path):
+        os.remove(output_video_path)
 
 @socketio.on('frame')
 def handle_frame(data):
-    global video_writer
+    global video_writer, frame_index  # Use global frame index
+    try:
+        # Convert base64 to bytes
+        frame_data = base64.b64decode(data['frame'])
+        frame_bytes = io.BytesIO(frame_data)
+        image = Image.open(frame_bytes)
+        
+        # Ensure image is in correct format
+        image = image.convert('RGBA')
 
-    frame_bytes = io.BytesIO(data['frame'])
-    image = Image.open(frame_bytes)
+        # Process background removal
+        result = remove(image)
 
-    # Xử lý xóa nền
-    result = remove(image)
+        # Apply background if available
+        global background_image
+        if background_image:
+            background = ImageOps.fit(background_image, result.size, method=Image.Resampling.LANCZOS)
+            final_image = Image.alpha_composite(background.convert('RGBA'), result)
+        else:
+            final_image = result
 
-    # Áp dụng background nếu có
-    global background_image
-    if background_image:
-        background = ImageOps.fit(background_image, result.size, method=Image.Resampling.LANCZOS)
-        final_image = Image.alpha_composite(background, result)
-    else:
-        final_image = result
+        # Convert processed image to NumPy array
+        result_frame = np.array(final_image.convert("RGB"))
 
-    result_frame = np.array(final_image.convert("RGB"))
+        # Initialize VideoWriter if not already set
+        if video_writer is None:
+            height, width, _ = result_frame.shape
+            global fourcc
+            fourcc = cv2.VideoWriter_fourcc(*'XIDV')  # MPEG-4 codec
+            video_writer = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
 
-    if video_writer is None:
-        height, width, _ = result_frame.shape
-        video_writer = cv2.VideoWriter(output_video_path, fourcc, 20.0, (width, height))
-    video_writer.write(cv2.cvtColor(result_frame, cv2.COLOR_RGB2BGR))
+        # Write frame with PTS adjustment
+        timestamp = frame_index / fps  # Calculate timestamp
+        print(f"Frame Index: {frame_index}, Timestamp: {timestamp:.2f}s")
 
-    # Gửi lại khung hình đã xử lý cho front-end
-    result_bytes = io.BytesIO()
-    final_image.save(result_bytes, format="PNG")
-    emit('processed_frame', result_bytes.getvalue())
+        # Ensure the frame is in BGR format for OpenCV
+        video_writer.write(cv2.cvtColor(result_frame, cv2.COLOR_RGB2BGR))
 
+        # Increment frame index
+        frame_index += 1
+
+        # Send processed frame back to the front-end
+        result_bytes = io.BytesIO()
+        final_image.save(result_bytes, format="PNG")
+        result_bytes.seek(0)
+        emit('processed_frame', {'frame': base64.b64encode(result_bytes.getvalue()).decode('utf-8')})
+
+    except Exception as e:
+        emit('error', {'message': str(e)})
 
 @app.route('/upload-background', methods=['POST'])
 def upload_background():
@@ -62,7 +99,11 @@ def download_video():
     if video_writer:
         video_writer.release()
         video_writer = None
-    return send_file(output_video_path, as_attachment=True)
+    # Check if the file exists before sending
+    if os.path.exists(output_video_path):
+        return send_file(output_video_path, as_attachment=True)
+    else:
+        return jsonify({'error': 'Video file not found'}), 404
 
 
 @app.route('/remove-background/image', methods=['POST'])

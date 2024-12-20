@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remove Background Realtime</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #e0e0e0;
+            color: #333;
+        }
+        h1 {
+            font-weight: 500;
+            margin-bottom: 20px;
+        }
+        video, img {
+            max-width: 90%;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        button, input[type="file"] {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        button {
+            background-color: #007BFF;
+            color: white;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        input[type="file"] {
+            background-color: #f8f9fa;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>Realtime Background Removal</h1>
+    <video id="video" style="display:none;" autoplay></video>
+    <canvas id="canvas" style="display:none;"></canvas>
+    <img id="output" alt="Processed frame will appear here">
+    <input type="file" id="backgroundInput" accept="image/*">
+    <button id="toggleCapture">Start Capture</button>
+    <button id="download">Download Processed Video</button>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.js"></script>
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const output = document.getElementById('output');
+        const backgroundInput = document.getElementById('backgroundInput');
+        const downloadButton = document.getElementById('download');
+        const toggleCaptureButton = document.getElementById('toggleCapture');
+        const ctx = canvas.getContext('2d');
+
+        const socket = io('http://127.0.0.1:5000', {
+            transports: ['websocket', 'polling']
+        });
+
+        let capturing = false;
+        let captureInterval;
+
+        // Load video from webcam
+        async function startVideo() {
+            socket.emit('reset');
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+        }
+
+        // End video from webcam
+        function endVideo() {
+            const stream = video.srcObject;
+            const tracks = stream.getTracks();
+
+            tracks.forEach(function(track) {
+                track.stop();
+            });
+
+            video.srcObject = null;
+        }
+
+        // Send frame via WebSocket
+        async function sendFrame() {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+
+            // Draw current frame to canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            try {
+                // Convert canvas to blob
+                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                
+                // Convert blob to base64
+                const base64 = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        // Convert ArrayBuffer to Base64 string
+                        const base64String = btoa(
+                            new Uint8Array(reader.result)
+                                .reduce((data, byte) => data + String.fromCharCode(byte), '')
+                        );
+                        resolve(base64String);
+                    };
+                    reader.onerror = reject;
+                    reader.readAsArrayBuffer(blob);
+                });
+
+                // Send base64 data
+                socket.emit('frame', { frame: base64 });
+            } catch (error) {
+                console.error('Error sending frame:', error);
+            }
+        }
+
+        // Listen for processed frame from server
+        socket.on('processed_frame', (data) => {
+            const uint8Array = new Uint8Array(data);
+            const imageData = new ImageData(new Uint8ClampedArray(uint8Array), canvas.width, canvas.height);
+            ctx.putImageData(imageData, 0, 0);
+        });
+
+        // Send custom background
+        backgroundInput.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            const formData = new FormData();
+            formData.append('background', file);
+
+            await fetch('http://127.0.0.1:5000/upload-background', {
+                method: 'POST',
+                body: formData,
+            });
+            alert('Background uploaded successfully');
+        });
+
+        // Download processed video
+        downloadButton.addEventListener('click', () => {
+            window.location.href = 'http://127.0.0.1:5000/download-video';
+        });
+
+        // Toggle video capture
+        toggleCaptureButton.addEventListener('click', () => {
+            capturing = !capturing;
+            toggleCaptureButton.textContent = capturing ? 'Stop Capture' : 'Start Capture';
+            video.style.display = capturing ? 'block' : 'none';
+            if (capturing) {
+                // Start
+                startVideo();
+                captureInterval = setInterval(sendFrame, 50); // Adjust send rate
+            } else {
+                clearInterval(captureInterval);
+                endVideo();
+            }
+        });
+    </script>
+</body>
+</html>
