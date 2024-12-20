@@ -1,4 +1,5 @@
 import os
+import threading
 
 from flask import Flask, send_file, request, jsonify
 from flask_socketio import SocketIO, emit
@@ -9,16 +10,22 @@ import numpy as np
 import io
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")  # Kích hoạt WebSocket
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    logger=True,
+)
+logger = app.logger
+logger.setLevel('INFO')
+
 
 background_image = None
 output_video_path = "output_video.mp4"
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 video_writer = None
 
-
-@socketio.on('frame')
-def handle_frame(data):
+def process_frame(data):
+    logger.info('Processing frame in thread')
     global video_writer
 
     frame_bytes = io.BytesIO(data['frame'])
@@ -45,7 +52,13 @@ def handle_frame(data):
     # Gửi lại khung hình đã xử lý cho front-end
     result_bytes = io.BytesIO()
     final_image.save(result_bytes, format="PNG")
-    emit('processed_frame', result_bytes.getvalue())
+    socketio.emit('processed_frame', result_bytes.getvalue())
+
+@socketio.on('frame')
+def handle_frame(data):
+    logger.info('Received frame')
+    thread = threading.Thread(target=process_frame, args=(data,))
+    thread.start()
 
 
 @app.route('/upload-background', methods=['POST'])
