@@ -1,10 +1,12 @@
 import os
 import threading
+import time
 
 from flask import Flask, send_file, request, jsonify
 from flask_socketio import SocketIO, emit
 from rembg import remove
-from PIL import Image, ImageOps
+from rembg.session_factory import new_session
+from PIL import Image, ImageOps, ImageFilter
 import cv2
 import numpy as np
 import io
@@ -23,27 +25,43 @@ background_image = None
 output_video_path = "output_video.mp4"
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 video_writer = None
+session = new_session(model_name="u2netp")
 
 def process_frame(data):
     logger.info('Processing frame in thread')
-    global video_writer
+    global video_writer, background_image
 
+    # Đọc và mở ảnh từ dữ liệu đầu vào
     frame_bytes = io.BytesIO(data['frame'])
-    image = Image.open(frame_bytes)
+    image = Image.open(frame_bytes).convert("RGBA")  # Chuyển sang RGBA ngay từ đầu để đảm bảo tính tương thích
 
-    # Xử lý xóa nền
-    result = remove(image)
+    # Downscale hình ảnh để cải thiện hiệu suất
+    original_size = image.size
+    target_size = (512, 512)
+    image = image.filter(ImageFilter.MedianFilter(size=3))
+    image = image.resize(target_size, Image.Resampling.LANCZOS)
 
-    # Áp dụng background nếu có
-    global background_image
+    # Loại bỏ nền
+    time_start = time.time()
+    result = remove(image, session=session)
+    time_end = time.time()
+    logger.info(f"Background removal time: {time_end - time_start:.2f}s")
+
+    # Áp dụng nền tùy chỉnh nếu có
     if background_image:
+        # Resize background để khớp với kích thước ảnh đã xử lý
         background = ImageOps.fit(background_image, result.size, method=Image.Resampling.LANCZOS)
         final_image = Image.alpha_composite(background, result)
     else:
         final_image = result
 
+    # Khôi phục kích thước ban đầu
+    final_image = final_image.resize(original_size, Image.Resampling.LANCZOS)
+
+    # Chuyển ảnh thành mảng numpy cho OpenCV
     result_frame = np.array(final_image.convert("RGB"))
 
+    # Tạo video_writer nếu chưa có
     if video_writer is None:
         height, width, _ = result_frame.shape
         video_writer = cv2.VideoWriter(output_video_path, fourcc, 20.0, (width, height))
