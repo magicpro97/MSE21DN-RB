@@ -64,8 +64,7 @@
 
         // Start video stream
         async function startVideo() {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            video.srcObject = stream;
+            video.srcObject = await navigator.mediaDevices.getUserMedia({video: true});
             video.play();
         }
 
@@ -96,16 +95,7 @@
         // Upload background
         backgroundInput.addEventListener('change', async (event) => {
             const file = event.target.files[0];
-            const url = URL.createObjectURL(file);
-            background.src = url;
-
-            const formData = new FormData();
-            formData.append('background', file);
-
-            await fetch('http://127.0.0.1:5000/upload-background', {
-                method: 'POST',
-                body: formData,
-            });
+            background.src = URL.createObjectURL(file);
             alert('Background uploaded successfully');
         });
 

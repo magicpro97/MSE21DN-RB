@@ -21,7 +21,6 @@ logger.setLevel('INFO')
 pool = ThreadPoolExecutor(max_workers=4)
 
 
-background_image = None
 output_video_path = "output_video.mp4"
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 video_writer = None
@@ -50,10 +49,6 @@ def process_frame(data):
     # Làm mềm viên ảnh
     final_image = final_image.filter(ImageFilter.SMOOTH)
 
-    # Thêm ảnh nền nếu có
-    if background_image:
-        final_image = Image.alpha_composite(background_image, final_image)
-
     # Chuyển ảnh thành mảng numpy cho OpenCV
     result_frame = np.array(final_image.convert("RGB"))
 
@@ -72,13 +67,6 @@ def process_frame(data):
 def handle_frame(data):
     logger.info('Received frame')
     pool.submit(process_frame, data)
-
-@app.route('/upload-background', methods=['POST'])
-def upload_background():
-    global background_image
-    file = request.files['background']
-    background_image = Image.open(file).convert("RGBA")
-    return "Background uploaded successfully", 200
 
 
 @app.route('/download-video', methods=['GET'])
