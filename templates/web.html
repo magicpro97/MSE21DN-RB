@@ -4,28 +4,43 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Remove Background Realtime</title>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
     <style>
         body {
-            font-family: 'Roboto', sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
             margin: 0;
-            background-color: #e0e0e0;
-            color: #333;
-        }
-        h1 {
-            font-weight: 500;
-            margin-bottom: 20px;
+            overflow: hidden;
         }
         video, img {
-            max-width: 90%;
+            max-width: 100%;
             border-radius: 8px;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
             margin-bottom: 20px;
+        }
+        .container {
+            position: relative;
+            width: 100vw;
+            height: 80vh;
+            margin-top: 20vh;
+            background-color: #f0f0f0;
+        }
+        #background {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 0;
+        }
+        #foreground {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            cursor: grab;
+            z-index: 1;
+        }
+        #foreground:active {
+            cursor: grabbing;
         }
         button, input[type="file"] {
             margin: 10px;
@@ -35,6 +50,10 @@
             border-radius: 5px;
             cursor: pointer;
             transition: background-color 0.3s ease;
+        }
+        label {
+            font-size: 16px;
+            font-weight: bold;
         }
         button {
             background-color: #007BFF;
@@ -50,36 +69,41 @@
     </style>
 </head>
 <body>
-    <h1>Realtime Background Removal</h1>
-    <video id="video" style="display:none;" autoplay></video>
-    <canvas id="canvas" style="display:none;"></canvas>
-    <img id="output" alt="Processed frame will appear here">
-    <input type="file" id="backgroundInput" accept="image/*">
-    <button id="toggleCapture">Start Capture</button>
-    <button id="download">Download Processed Video</button>
+    <h1 style="position: fixed; top: 0; left: 10px; text-align: center; width: 100%;">Realtime Background Removal</h1>
+    <div class="container">
+        <img id="background" src="" alt="Background">
+        <img id="foreground" src="" alt="Foreground">
+    </div>
+    <div style="position: fixed; top: 10vh; left: 10px;">
+        <label for="backgroundInput">Input Background Image:</label>
+        <input type="file" id="backgroundInput" accept="image/*">
+    </div>
+    <div style="position: fixed; top: 10vh; right: 10px; display: flex; flex-direction: row; align-items: center;">
+        <button id="toggleCapture">Start Capture</button>
+        <button id="download">Download Processed Video</button>
+    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.js"></script>
     <script>
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const output = document.getElementById('output');
+        const video = document.createElement('video'); // Hidden video element
+        const canvas = document.createElement('canvas'); // Hidden canvas element
+        const ctx = canvas.getContext('2d');
+        const background = document.getElementById('background');
+        const foreground = document.getElementById('foreground');
         const backgroundInput = document.getElementById('backgroundInput');
         const downloadButton = document.getElementById('download');
         const toggleCaptureButton = document.getElementById('toggleCapture');
-        const ctx = canvas.getContext('2d');
+        const socket = io('http://127.0.0.1:5000'); // WebSocket connection
 
-        const socket = io('http://127.0.0.1:5000', {
-            transports: ['websocket', 'polling']
-        });
+        // Initialize dragging state
+        let isDragging = false;
+        let dragStartX = 0, dragStartY = 0;
+        let foregroundX = 0, foregroundY = 0;
 
-        let capturing = false;
-        let captureInterval;
-
-        // Load video from webcam
+        // Start video stream
         async function startVideo() {
-            socket.emit('reset');
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            video.srcObject = stream;
+            video.srcObject = await navigator.mediaDevices.getUserMedia({video: true});
+            video.play();
         }
 
         // End video from webcam
@@ -94,57 +118,34 @@
             video.srcObject = null;
         }
 
-        // Send frame via WebSocket
+        // Send frame to server
         async function sendFrame() {
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
 
-            // Draw current frame to canvas
+            // Draw current frame on canvas
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            try {
-                // Convert canvas to blob
-                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-                
-                // Convert blob to base64
-                const base64 = await new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                        // Convert ArrayBuffer to Base64 string
-                        const base64String = btoa(
-                            new Uint8Array(reader.result)
-                                .reduce((data, byte) => data + String.fromCharCode(byte), '')
-                        );
-                        resolve(base64String);
-                    };
-                    reader.onerror = reject;
-                    reader.readAsArrayBuffer(blob);
-                });
-
-                // Send base64 data
-                socket.emit('frame', { frame: base64 });
-            } catch (error) {
-                console.error('Error sending frame:', error);
-            }
+            // Convert frame to Blob and send via WebSocket
+            canvas.toBlob((blob) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    socket.emit('frame', { frame: reader.result });
+                };
+                reader.readAsArrayBuffer(blob);
+            }, 'image/png');
         }
 
-        // Listen for processed frame from server
+        // Receive processed frame
         socket.on('processed_frame', (data) => {
-            const uint8Array = new Uint8Array(data);
-            const imageData = new ImageData(new Uint8ClampedArray(uint8Array), canvas.width, canvas.height);
-            ctx.putImageData(imageData, 0, 0);
+            const blob = new Blob([data], { type: 'image/png' });
+            foreground.src = URL.createObjectURL(blob);
         });
 
-        // Send custom background
+        // Upload background
         backgroundInput.addEventListener('change', async (event) => {
             const file = event.target.files[0];
-            const formData = new FormData();
-            formData.append('background', file);
-
-            await fetch('http://127.0.0.1:5000/upload-background', {
-                method: 'POST',
-                body: formData,
-            });
+            background.src = URL.createObjectURL(file);
             alert('Background uploaded successfully');
         });
 
@@ -152,7 +153,8 @@
         downloadButton.addEventListener('click', () => {
             window.location.href = 'http://127.0.0.1:5000/download-video';
         });
-
+        let capturing = false;
+        let captureInterval;
         // Toggle video capture
         toggleCaptureButton.addEventListener('click', () => {
             capturing = !capturing;
@@ -166,6 +168,27 @@
                 clearInterval(captureInterval);
                 endVideo();
             }
+        });
+
+        // Handle dragging
+        foreground.addEventListener('mousedown', (event) => {
+            isDragging = true;
+            dragStartX = event.clientX - foregroundX;
+            dragStartY = event.clientY - foregroundY;
+        });
+
+        window.addEventListener('mousemove', (event) => {
+            if (isDragging) {
+                foregroundX = event.clientX - dragStartX;
+                foregroundY = event.clientY - dragStartY;
+
+                foreground.style.left = `${foregroundX}px`;
+                foreground.style.top = `${foregroundY}px`;
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
         });
     </script>
 </body>
