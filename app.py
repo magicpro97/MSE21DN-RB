@@ -1,12 +1,11 @@
 import io
 import os
 from concurrent.futures.thread import ThreadPoolExecutor
-
 import cv2
 import numpy as np
+from flask import Flask, send_file, request, jsonify, render_template
+from flask_socketio import SocketIO, emit
 from PIL import Image, ImageFilter
-from flask import Flask, send_file, request, jsonify
-from flask_socketio import SocketIO
 from rembg import remove
 from rembg.session_factory import new_session
 
@@ -25,6 +24,20 @@ output_video_path = "output_video.mp4"
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 video_writer = None
 session = new_session(model_name="u2netp")
+
+# Default page route
+@app.route('/')
+def index():
+    return render_template('web.html')
+
+@socketio.on('reset')
+def reset_video():
+    global video_writer
+    if video_writer is not None:
+        video_writer.release()
+        video_writer = None
+    if os.path.exists(output_video_path):
+        os.remove(output_video_path)
 
 def process_frame(data):
     logger.info('Processing frame in thread')
@@ -75,7 +88,11 @@ def download_video():
     if video_writer:
         video_writer.release()
         video_writer = None
-    return send_file(output_video_path, as_attachment=True)
+    # Check if the file exists before sending
+    if os.path.exists(output_video_path):
+        return send_file(output_video_path, as_attachment=True)
+    else:
+        return jsonify({'error': 'Video file not found'}), 404
 
 
 @app.route('/remove-background/image', methods=['POST'])

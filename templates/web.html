@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remove Background Realtime</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+        video, img {
+            max-width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        .container {
+            position: relative;
+            width: 100vw;
+            height: 80vh;
+            margin-top: 20vh;
+            background-color: #f0f0f0;
+        }
+        #background {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 0;
+        }
+        #foreground {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            cursor: grab;
+            z-index: 1;
+        }
+        #foreground:active {
+            cursor: grabbing;
+        }
+        button, input[type="file"] {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        label {
+            font-size: 16px;
+            font-weight: bold;
+        }
+        button {
+            background-color: #007BFF;
+            color: white;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        input[type="file"] {
+            background-color: #f8f9fa;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <h1 style="position: fixed; top: 0; left: 10px; text-align: center; width: 100%;">Realtime Background Removal</h1>
+    <div class="container">
+        <img id="background" src="" alt="Background">
+        <img id="foreground" src="" alt="Foreground">
+    </div>
+    <div style="position: fixed; top: 10vh; left: 10px;">
+        <label for="backgroundInput">Input Background Image:</label>
+        <input type="file" id="backgroundInput" accept="image/*">
+    </div>
+    <div style="position: fixed; top: 10vh; right: 10px; display: flex; flex-direction: row; align-items: center;">
+        <button id="toggleCapture">Start Capture</button>
+        <button id="download">Download Processed Video</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.js"></script>
+    <script>
+        const video = document.createElement('video'); // Hidden video element
+        const canvas = document.createElement('canvas'); // Hidden canvas element
+        const ctx = canvas.getContext('2d');
+        const background = document.getElementById('background');
+        const foreground = document.getElementById('foreground');
+        const backgroundInput = document.getElementById('backgroundInput');
+        const downloadButton = document.getElementById('download');
+        const toggleCaptureButton = document.getElementById('toggleCapture');
+        const socket = io('http://127.0.0.1:5000'); // WebSocket connection
+
+        // Initialize dragging state
+        let isDragging = false;
+        let dragStartX = 0, dragStartY = 0;
+        let foregroundX = 0, foregroundY = 0;
+
+        // Start video stream
+        async function startVideo() {
+            video.srcObject = await navigator.mediaDevices.getUserMedia({video: true});
+            video.play();
+        }
+
+        // End video from webcam
+        function endVideo() {
+            const stream = video.srcObject;
+            const tracks = stream.getTracks();
+
+            tracks.forEach(function(track) {
+                track.stop();
+            });
+
+            video.srcObject = null;
+        }
+
+        // Send frame to server
+        async function sendFrame() {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+
+            // Draw current frame on canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Convert frame to Blob and send via WebSocket
+            canvas.toBlob((blob) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    socket.emit('frame', { frame: reader.result });
+                };
+                reader.readAsArrayBuffer(blob);
+            }, 'image/png');
+        }
+
+        // Receive processed frame
+        socket.on('processed_frame', (data) => {
+            const blob = new Blob([data], { type: 'image/png' });
+            foreground.src = URL.createObjectURL(blob);
+        });
+
+        // Upload background
+        backgroundInput.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            background.src = URL.createObjectURL(file);
+            alert('Background uploaded successfully');
+        });
+
+        // Download processed video
+        downloadButton.addEventListener('click', () => {
+            window.location.href = 'http://127.0.0.1:5000/download-video';
+        });
+        let capturing = false;
+        let captureInterval;
+        // Toggle video capture
+        toggleCaptureButton.addEventListener('click', () => {
+            capturing = !capturing;
+            toggleCaptureButton.textContent = capturing ? 'Stop Capture' : 'Start Capture';
+            video.style.display = capturing ? 'block' : 'none';
+            if (capturing) {
+                // Start
+                startVideo();
+                captureInterval = setInterval(sendFrame, 50); // Adjust send rate
+            } else {
+                clearInterval(captureInterval);
+                endVideo();
+            }
+        });
+
+        // Handle dragging
+        foreground.addEventListener('mousedown', (event) => {
+            isDragging = true;
+            dragStartX = event.clientX - foregroundX;
+            dragStartY = event.clientY - foregroundY;
+        });
+
+        window.addEventListener('mousemove', (event) => {
+            if (isDragging) {
+                foregroundX = event.clientX - dragStartX;
+                foregroundY = event.clientY - dragStartY;
+
+                foreground.style.left = `${foregroundX}px`;
+                foreground.style.top = `${foregroundY}px`;
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+    </script>
+</body>
+</html>
