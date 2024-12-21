@@ -1,23 +1,29 @@
+import io
 import os
-
-from flask import Flask, send_file, request, jsonify, render_template
-from flask_socketio import SocketIO, emit
-from rembg import remove
-from PIL import Image, ImageOps
+from concurrent.futures.thread import ThreadPoolExecutor
 import cv2
 import numpy as np
-import io
-import base64
+from flask import Flask, send_file, request, jsonify, render_template
+from flask_socketio import SocketIO, emit
+from PIL import Image, ImageFilter
+from rembg import remove
+from rembg.session_factory import new_session
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")  # Kích hoạt WebSocket
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    logger=True,
+)
+logger = app.logger
+logger.setLevel('INFO')
+pool = ThreadPoolExecutor(max_workers=4)
 
-background_image = None
+
 output_video_path = "output_video.mp4"
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 video_writer = None
-frame_index = 0
-fps = 20
+session = new_session(model_name="u2netp")
 
 # Default page route
 @app.route('/')
@@ -33,64 +39,47 @@ def reset_video():
     if os.path.exists(output_video_path):
         os.remove(output_video_path)
 
+def process_frame(data):
+    logger.info('Processing frame in thread')
+    global video_writer, background_image
+
+    # Đọc và mở ảnh từ dữ liệu đầu vào
+    frame_bytes = io.BytesIO(data['frame'])
+    image = Image.open(frame_bytes).convert("RGBA")  # Chuyển sang RGBA ngay từ đầu để đảm bảo tính tương thích
+
+    # Downscale hình ảnh để cải thiện hiệu suất
+    original_size = image.size
+    target_size = (512, 512)
+    image = image.filter(ImageFilter.MedianFilter(size=3))
+    image = image.resize(target_size, Image.Resampling.LANCZOS)
+
+    # Loại bỏ nền
+    result = remove(image, session=session)
+
+    # Khôi phục kích thước ban đầu
+    final_image = result.resize(original_size, Image.Resampling.LANCZOS)
+
+    # Làm mềm viên ảnh
+    final_image = final_image.filter(ImageFilter.SMOOTH)
+
+    # Chuyển ảnh thành mảng numpy cho OpenCV
+    result_frame = np.array(final_image.convert("RGB"))
+
+    # Tạo video_writer nếu chưa có
+    if video_writer is None:
+        height, width, _ = result_frame.shape
+        video_writer = cv2.VideoWriter(output_video_path, fourcc, 20.0, (width, height))
+    video_writer.write(cv2.cvtColor(result_frame, cv2.COLOR_RGB2BGR))
+
+    # Gửi lại khung hình đã xử lý cho front-end
+    result_bytes = io.BytesIO()
+    final_image.save(result_bytes, format="PNG")
+    socketio.emit('processed_frame', result_bytes.getvalue())
+
 @socketio.on('frame')
 def handle_frame(data):
-    global video_writer, frame_index  # Use global frame index
-    try:
-        # Convert base64 to bytes
-        frame_data = base64.b64decode(data['frame'])
-        frame_bytes = io.BytesIO(frame_data)
-        image = Image.open(frame_bytes)
-        
-        # Ensure image is in correct format
-        image = image.convert('RGBA')
-
-        # Process background removal
-        result = remove(image)
-
-        # Apply background if available
-        global background_image
-        if background_image:
-            background = ImageOps.fit(background_image, result.size, method=Image.Resampling.LANCZOS)
-            final_image = Image.alpha_composite(background.convert('RGBA'), result)
-        else:
-            final_image = result
-
-        # Convert processed image to NumPy array
-        result_frame = np.array(final_image.convert("RGB"))
-
-        # Initialize VideoWriter if not already set
-        if video_writer is None:
-            height, width, _ = result_frame.shape
-            global fourcc
-            fourcc = cv2.VideoWriter_fourcc(*'XIDV')  # MPEG-4 codec
-            video_writer = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
-
-        # Write frame with PTS adjustment
-        timestamp = frame_index / fps  # Calculate timestamp
-        print(f"Frame Index: {frame_index}, Timestamp: {timestamp:.2f}s")
-
-        # Ensure the frame is in BGR format for OpenCV
-        video_writer.write(cv2.cvtColor(result_frame, cv2.COLOR_RGB2BGR))
-
-        # Increment frame index
-        frame_index += 1
-
-        # Send processed frame back to the front-end
-        result_bytes = io.BytesIO()
-        final_image.save(result_bytes, format="PNG")
-        result_bytes.seek(0)
-        emit('processed_frame', {'frame': base64.b64encode(result_bytes.getvalue()).decode('utf-8')})
-
-    except Exception as e:
-        emit('error', {'message': str(e)})
-
-@app.route('/upload-background', methods=['POST'])
-def upload_background():
-    global background_image
-    file = request.files['background']
-    background_image = Image.open(file).convert("RGBA")
-    return "Background uploaded successfully", 200
+    logger.info('Received frame')
+    pool.submit(process_frame, data)
 
 
 @app.route('/download-video', methods=['GET'])
