@@ -1,15 +1,15 @@
+import io
 import os
 import threading
 import time
 
-from flask import Flask, send_file, request, jsonify
-from flask_socketio import SocketIO, emit
-from rembg import remove
-from rembg.session_factory import new_session
-from PIL import Image, ImageOps, ImageFilter
 import cv2
 import numpy as np
-import io
+from PIL import Image, ImageFilter
+from flask import Flask, send_file, request, jsonify
+from flask_socketio import SocketIO
+from rembg import remove
+from rembg.session_factory import new_session
 
 app = Flask(__name__)
 socketio = SocketIO(
@@ -47,16 +47,8 @@ def process_frame(data):
     time_end = time.time()
     logger.info(f"Background removal time: {time_end - time_start:.2f}s")
 
-    # Áp dụng nền tùy chỉnh nếu có
-    if background_image:
-        # Resize background để khớp với kích thước ảnh đã xử lý
-        background = ImageOps.fit(background_image, result.size, method=Image.Resampling.LANCZOS)
-        final_image = Image.alpha_composite(background, result)
-    else:
-        final_image = result
-
     # Khôi phục kích thước ban đầu
-    final_image = final_image.resize(original_size, Image.Resampling.LANCZOS)
+    final_image = result.resize(original_size, Image.Resampling.LANCZOS)
 
     # Chuyển ảnh thành mảng numpy cho OpenCV
     result_frame = np.array(final_image.convert("RGB"))

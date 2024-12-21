@@ -4,41 +4,80 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Remove Background Realtime</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+        .container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background-color: #f0f0f0;
+        }
+        #background {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 0;
+        }
+        #foreground {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            cursor: grab;
+            z-index: 1;
+        }
+        #foreground:active {
+            cursor: grabbing;
+        }
+    </style>
 </head>
 <body>
-    <h1>Realtime Background Removal</h1>
-    <video id="video" autoplay></video>
-    <canvas id="canvas" style="display:none;"></canvas>
-    <img id="output" alt="Processed frame will appear here">
-    <input type="file" id="backgroundInput" accept="image/*">
-    <button id="download">Download Processed Video</button>
+    <h1 style="display:none;">Realtime Background Removal</h1>
+    <div class="container">
+        <img id="background" src="" alt="Background">
+        <img id="foreground" src="" alt="Foreground">
+    </div>
+    <input type="file" id="backgroundInput" accept="image/*" style="position: fixed; top: 10px; left: 10px;">
+    <button id="download" style="position: fixed; top: 10px; right: 10px;">Download Processed Video</button>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.js"></script>
     <script>
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const output = document.getElementById('output');
+        const video = document.createElement('video'); // Hidden video element
+        const canvas = document.createElement('canvas'); // Hidden canvas element
+        const ctx = canvas.getContext('2d');
+        const background = document.getElementById('background');
+        const foreground = document.getElementById('foreground');
         const backgroundInput = document.getElementById('backgroundInput');
         const downloadButton = document.getElementById('download');
-        const ctx = canvas.getContext('2d');
+        const socket = io('http://127.0.0.1:5000'); // WebSocket connection
 
-        const socket = io('http://127.0.0.1:5000'); // Kết nối WebSocket
+        // Initialize dragging state
+        let isDragging = false;
+        let dragStartX = 0, dragStartY = 0;
+        let foregroundX = 0, foregroundY = 0;
 
-        // Tải video từ webcam
+        // Start video stream
         async function startVideo() {
             const stream = await navigator.mediaDevices.getUserMedia({ video: true });
             video.srcObject = stream;
+            video.play();
         }
 
-        // Gửi khung hình qua WebSocket
+        // Send frame to server
         async function sendFrame() {
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
 
-            // Vẽ khung hình hiện tại vào canvas
+            // Draw current frame on canvas
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            // Chuyển khung hình thành Blob
+            // Convert frame to Blob and send via WebSocket
             canvas.toBlob((blob) => {
                 const reader = new FileReader();
                 reader.onloadend = () => {
@@ -48,15 +87,18 @@
             }, 'image/png');
         }
 
-        // Lắng nghe khung hình đã xử lý từ server
+        // Receive processed frame
         socket.on('processed_frame', (data) => {
             const blob = new Blob([data], { type: 'image/png' });
-            output.src = URL.createObjectURL(blob);
+            foreground.src = URL.createObjectURL(blob);
         });
 
-        // Gửi background tùy chỉnh
+        // Upload background
         backgroundInput.addEventListener('change', async (event) => {
             const file = event.target.files[0];
+            const url = URL.createObjectURL(file);
+            background.src = url;
+
             const formData = new FormData();
             formData.append('background', file);
 
@@ -67,19 +109,40 @@
             alert('Background uploaded successfully');
         });
 
-        // Tải video đã xử lý
+        // Download processed video
         downloadButton.addEventListener('click', () => {
             window.location.href = 'http://127.0.0.1:5000/download-video';
         });
 
-        // Xử lý video stream
+        // Handle dragging
+        foreground.addEventListener('mousedown', (event) => {
+            isDragging = true;
+            dragStartX = event.clientX - foregroundX;
+            dragStartY = event.clientY - foregroundY;
+        });
+
+        window.addEventListener('mousemove', (event) => {
+            if (isDragging) {
+                foregroundX = event.clientX - dragStartX;
+                foregroundY = event.clientY - dragStartY;
+
+                foreground.style.left = `${foregroundX}px`;
+                foreground.style.top = `${foregroundY}px`;
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        // Start sending frames
         video.addEventListener('play', () => {
             setInterval(() => {
                 sendFrame();
-            }, 50); // Điều chỉnh tốc độ gửi
+            }, 50);
         });
 
-        // Bắt đầu
+        // Start everything
         startVideo();
     </script>
 </body>
