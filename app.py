@@ -1,7 +1,6 @@
 import io
 import os
-import threading
-import time
+from concurrent.futures.thread import ThreadPoolExecutor
 
 import cv2
 import numpy as np
@@ -19,6 +18,7 @@ socketio = SocketIO(
 )
 logger = app.logger
 logger.setLevel('INFO')
+pool = ThreadPoolExecutor(max_workers=4)
 
 
 background_image = None
@@ -42,13 +42,17 @@ def process_frame(data):
     image = image.resize(target_size, Image.Resampling.LANCZOS)
 
     # Loại bỏ nền
-    time_start = time.time()
     result = remove(image, session=session)
-    time_end = time.time()
-    logger.info(f"Background removal time: {time_end - time_start:.2f}s")
 
     # Khôi phục kích thước ban đầu
     final_image = result.resize(original_size, Image.Resampling.LANCZOS)
+
+    # Làm mềm viên ảnh
+    final_image = final_image.filter(ImageFilter.SMOOTH)
+
+    # Thêm ảnh nền nếu có
+    if background_image:
+        final_image = Image.alpha_composite(background_image, final_image)
 
     # Chuyển ảnh thành mảng numpy cho OpenCV
     result_frame = np.array(final_image.convert("RGB"))
@@ -67,9 +71,7 @@ def process_frame(data):
 @socketio.on('frame')
 def handle_frame(data):
     logger.info('Received frame')
-    thread = threading.Thread(target=process_frame, args=(data,))
-    thread.start()
-
+    pool.submit(process_frame, data)
 
 @app.route('/upload-background', methods=['POST'])
 def upload_background():
