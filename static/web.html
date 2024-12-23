@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Remove Background Realtime</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+      /* .container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background-color: #f0f0f0;
+        } */
+      #background {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        z-index: 0;
+      }
+      #foreground {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        cursor: grab;
+        z-index: 1;
+      }
+      #foreground:active {
+        cursor: grabbing;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app" class="relative bg-slate-600">
+      <h1 class="hidden">Realtime Background Removal</h1>
+      <div
+        class="w-screen fixed top-0 left-0 flex gap-3 justify-center items-center p-2 z-10"
+      >
+        <label
+          for="backgroundInput"
+          class="bg-blue-500 text-white rounded hover:bg-blue-600 aspect-video flex justify-center items-center text-center w-[180px] border-2 border-slate-400 hover:border-slate-900"
+        >
+          <!-- <span v-if="bgData"></span>
+            <span v-else> + </span> -->
+          Select<br />Background
+        </label>
+        <button
+          @click="setBg('http://localhost:5000/static/pexels-karlsolano-2883049.jpg')"
+          class="bg-blue-500 text-white rounded hover:bg-blue-600 aspect-video flex justify-center items-center text-center w-[180px] border-2 border-slate-400 hover:border-slate-900"
+        >
+          <img
+            class="w-full"
+            src="http://localhost:5000/static/pexels-karlsolano-2883049.jpg"
+          />
+        </button>
+        <button
+          @click="setBg('http://localhost:5000/static/vecteezy_ai-generated-a-modern-interior-design-background-clean_35796521.jpg')"
+          class="bg-blue-500 text-white rounded hover:bg-blue-600 aspect-video flex justify-center items-center text-center w-[180px] border-2 border-slate-400 hover:border-slate-900"
+        >
+          <img
+            class="w-full"
+            src="http://localhost:5000/static/vecteezy_ai-generated-a-modern-interior-design-background-clean_35796521.jpg"
+          />
+        </button>
+        <button
+          @click="setBg('http://localhost:5000/static/615.jpg')"
+          class="bg-blue-500 text-white rounded hover:bg-blue-600 aspect-video flex justify-center items-center text-center w-[180px] border-2 border-slate-400 hover:border-slate-900"
+        >
+          <img class="w-full" src="http://localhost:5000/static/615.jpg" />
+        </button>
+      </div>
+      <div class="w-screen h-screen flex justify-center items-center">
+        <div
+          class="rounded-2xl border-4 border-slate-900 w-full h-full bg-white"
+        >
+          <img
+            id="background"
+            style="opacity: 0%"
+            src=""
+            class="block"
+            alt="Background"
+          />
+          <img id="foreground" src="" alt="Foreground" />
+        </div>
+      </div>
+      <input
+        type="file"
+        id="backgroundInput"
+        accept="image/*"
+        class="hidden border border-gray-300 rounded px-4 py-2"
+      />
+      <!-- <button
+        id="download"
+        class="fixed top-2 right-2 bg-blue-500 text-white rounded hover:bg-blue-600 aspect-video flex justify-center items-center text-center w-[180px]"
+      >
+        Download Processed Video
+      </button> -->
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.js"></script>
+    <script>
+      let start;
+      const { createApp } = Vue;
+
+      createApp({
+        data() {
+          return {
+            isDragging: false,
+            dragStartX: 0,
+            dragStartY: 0,
+            foregroundX: 0,
+            foregroundY: 0,
+          };
+        },
+        mounted() {
+          this.startVideo();
+        },
+        methods: {
+          async startVideo() {
+            const video = document.createElement("video");
+            const canvas = document.createElement("canvas");
+            const ctx = canvas.getContext("2d");
+            const socket = io("http://127.0.0.1:5000");
+            const background = document.getElementById("background");
+            const foreground = document.getElementById("foreground");
+            const backgroundInput = document.getElementById("backgroundInput");
+
+            backgroundInput.addEventListener("change", (event) => {
+              const file = event.target.files[0];
+              background.src = URL.createObjectURL(file);
+              background.style = "";
+              alert("Background uploaded successfully");
+            });
+            // const downloadButton = document.getElementById("download");
+
+            video.srcObject = await navigator.mediaDevices.getUserMedia({
+              video: true,
+            });
+            video.play();
+
+            // Function to handle frame updates
+            function onVideoFrame(timestamp) {
+              // Resize canvas to match video dimensions
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+
+              // Draw current frame to canvas
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              if (!start) {
+                start = timestamp;
+              }
+              const elapsed = timestamp - start;
+              const shift = Math.min(0.1 * elapsed, 200);
+              if (shift < 200000 && shift > 1000 / 24) {
+                console.log(shift);
+                //   Send the frame via WebSocket or update an image element
+                canvas.toBlob((blob) => {
+                  if (blob) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                      socket.emit("frame", { frame: reader.result });
+                    };
+                    reader.readAsArrayBuffer(blob);
+                  }
+                }, "image/png");
+
+                start = timestamp;
+              }
+
+              // Request the next frame
+              video.requestVideoFrameCallback(onVideoFrame);
+            }
+
+            // Start processing video frames
+            video.addEventListener("play", () => {
+              video.requestVideoFrameCallback(onVideoFrame);
+            });
+            socket.on("processed_frame", (data) => {
+              const blob = new Blob([data], { type: "image/png" });
+              foreground.src = URL.createObjectURL(blob);
+            });
+
+            // downloadButton.addEventListener("click", () => {
+            //   window.location.href = "http://127.0.0.1:5000/download-video";
+            // });
+
+            foreground.addEventListener("mousedown", (event) => {
+              this.isDragging = true;
+              this.dragStartX = event.clientX - this.foregroundX;
+              this.dragStartY = event.clientY - this.foregroundY;
+            });
+
+            window.addEventListener("mousemove", (event) => {
+              if (this.isDragging) {
+                this.foregroundX = event.clientX - this.dragStartX;
+                this.foregroundY = event.clientY - this.dragStartY;
+                foreground.style.left = `${this.foregroundX}px`;
+                foreground.style.top = `${this.foregroundY}px`;
+              }
+            });
+
+            window.addEventListener("mouseup", () => {
+              this.isDragging = false;
+            });
+          },
+
+          setBg: (src) => {
+            const background = document.getElementById("background");
+            background.src = src;
+            background.style = "";
+          },
+        },
+      }).mount("#app");
+    </script>
+  </body>
+</html>
