@@ -76,6 +76,7 @@
             >Start Capture</button>
             <a id="download"
                 class="h-full bg-blue-500 text-white rounded hover:bg-blue-600 aspect-video flex justify-center items-center text-center w-[180px]"
+                style="display: none;"
                 >
                 Download Processed Video
             </a>
@@ -182,6 +183,7 @@
                     const url = URL.createObjectURL(blob);
                     downloadButton.href = url;
                     downloadButton.download = 'video.webm';
+                    downloadButton.style.display = 'flex';
                 };
             }
 
@@ -225,6 +227,7 @@
 
             // Start video stream
             async function startRecordingVideo() {
+                downloadButton.style.display = 'none';
                 video.srcObject = await navigator.mediaDevices.getUserMedia({video: true});
                 video.play();
             }
