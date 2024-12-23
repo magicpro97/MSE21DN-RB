@@ -3,11 +3,12 @@ import os
 from concurrent.futures.thread import ThreadPoolExecutor
 import cv2
 import numpy as np
-from flask import Flask, send_file, request, jsonify, render_template
+from flask import Flask, send_file, send_from_directory, request, jsonify, render_template
 from flask_socketio import SocketIO, emit
 from PIL import Image, ImageFilter
 from rembg import remove
 from rembg.session_factory import new_session
+import mediapipe as mp
 
 app = Flask(__name__)
 socketio = SocketIO(
@@ -19,6 +20,9 @@ logger = app.logger
 logger.setLevel('INFO')
 pool = ThreadPoolExecutor(max_workers=4)
 
+# Khởi tạo Mediapipe Selfie Segmentation
+mp_selfie_segmentation = mp.solutions.selfie_segmentation
+selfie_segmentation = mp_selfie_segmentation.SelfieSegmentation(model_selection=1)
 
 output_video_path = "output_video.mp4"
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -40,40 +44,52 @@ def reset_video():
         os.remove(output_video_path)
 
 def process_frame(data):
-    logger.info('Processing frame in thread')
-    global video_writer, background_image
+    logger.info('Processing frame with Mediapipe (RGBA)')
+    global video_writer
 
-    # Đọc và mở ảnh từ dữ liệu đầu vào
+    # Read and open the image from the input data in RGBA format
     frame_bytes = io.BytesIO(data['frame'])
-    image = Image.open(frame_bytes).convert("RGBA")  # Chuyển sang RGBA ngay từ đầu để đảm bảo tính tương thích
+    image = Image.open(frame_bytes).convert("RGBA")  # Convert to RGBA
 
-    # Downscale hình ảnh để cải thiện hiệu suất
-    original_size = image.size
-    target_size = (512, 512)
-    image = image.filter(ImageFilter.MedianFilter(size=3))
-    image = image.resize(target_size, Image.Resampling.LANCZOS)
+    # Convert image to NumPy array
+    frame = np.array(image)
 
-    # Loại bỏ nền
-    result = remove(image, session=session)
+    # Mediapipe requires frames to be in RGB format (BGR for OpenCV processing)
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)  # Convert from RGBA to RGB
 
-    # Khôi phục kích thước ban đầu
-    final_image = result.resize(original_size, Image.Resampling.LANCZOS)
+    # Predict the mask using Mediapipe
+    result = selfie_segmentation.process(frame_rgb)
+    mask = result.segmentation_mask
 
-    # Làm mềm viên ảnh
-    final_image = final_image.filter(ImageFilter.SMOOTH)
+    # Threshold to separate foreground and background
+    threshold = 0.5
+    mask_binary = (mask > threshold).astype(np.uint8) * 255  # Convert to binary
 
-    # Chuyển ảnh thành mảng numpy cho OpenCV
-    result_frame = np.array(final_image.convert("RGB"))
+    # Prepare the RGBA frame
+    frame_rgba = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2RGBA)
 
-    # Tạo video_writer nếu chưa có
+    # Set the alpha channel using the binary mask
+    frame_rgba[:, :, 3] = mask_binary
+
+    # Optional: Replace the background with transparency
+    transparent_background = np.zeros_like(frame_rgba)
+    transparent_background[:, :, 3] = 255 - mask_binary  # Invert mask for transparency
+
+    # Combine the foreground with the transparent background
+    result_frame = frame_rgba
+
+    # Initialize video_writer if not already created
     if video_writer is None:
         height, width, _ = result_frame.shape
         video_writer = cv2.VideoWriter(output_video_path, fourcc, 20.0, (width, height))
-    video_writer.write(cv2.cvtColor(result_frame, cv2.COLOR_RGB2BGR))
 
-    # Gửi lại khung hình đã xử lý cho front-end
+    # Write the RGBA frame to the video
+    video_writer.write(cv2.cvtColor(result_frame, cv2.COLOR_RGBA2BGRA))  # OpenCV uses BGRA format for video
+
+    # Send the processed frame back to the front-end
+    result_image = Image.fromarray(result_frame, mode='RGBA')
     result_bytes = io.BytesIO()
-    final_image.save(result_bytes, format="PNG")
+    result_image.save(result_bytes, format="PNG")
     socketio.emit('processed_frame', result_bytes.getvalue())
 
 @socketio.on('frame')
@@ -140,6 +156,9 @@ def remove_background_video():
     os.remove(temp_input)
     return send_file(temp_output, mimetype='video/mp4')
 
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    return send_from_directory(app.static_folder, filename)
 
 if __name__ == '__main__':
     socketio.run(app, debug=True)
