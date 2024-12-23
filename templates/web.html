@@ -100,6 +100,85 @@
         let dragStartX = 0, dragStartY = 0;
         let foregroundX = 0, foregroundY = 0;
 
+        const downloadCanvas = document.createElement('canvas'); // Hidden canvas element
+        const downloadCtx = downloadCanvas.getContext('2d');
+        const chunks = [];
+        let mediaRecorder;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeForegroundPosition();
+        });
+
+        // Function to initialize foreground position based on CSS
+        function initializeForegroundPosition() {
+            const rect = foreground.getBoundingClientRect();
+            const parentRect = foreground.parentElement.getBoundingClientRect();
+
+            // Calculate initial X and Y in relation to the parent container
+            foregroundX = rect.left - parentRect.left;
+            foregroundY = rect.top - parentRect.top;
+
+            // Set the foreground's inline styles to match these calculated values
+            foreground.style.left = `${foregroundX}px`;
+            foreground.style.top = `${foregroundY}px`;
+            foreground.style.transform = 'none'; // Disable the translate(-50%, -50%) CSS transform
+        }
+
+        // Set up MediaRecorder
+        function setupMediaRecorder() {
+            const stream = downloadCanvas.captureStream(); // Capture the canvas as a media stream
+            mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    chunks.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'video.webm';
+                a.click();
+            };
+        }
+
+        // Start recording
+        function startRecording() {
+            downloadCanvas.width = background.width; // Match the canvas size to the img size
+            downloadCanvas.height = background.height;
+            setupMediaRecorder();
+            mediaRecorder.start();
+        }
+
+        // Stop recording
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                setTimeout(() => {
+                    mediaRecorder.stop();
+                }, 5000);
+            }
+        }
+
+        // Handle socket frame data
+        socket.on('processed_frame', (data) => {
+            const blob = new Blob([data], { type: 'image/png' });
+            const url = URL.createObjectURL(blob);
+
+            foreground.src = url;
+            foreground.onload = () => {
+                downloadCtx.clearRect(0, 0, downloadCanvas.width, downloadCanvas.height); // Clear the canvas
+        
+                // Draw the background
+                downloadCtx.drawImage(background, 0, 0, downloadCanvas.width, downloadCanvas.height);
+        
+                // Draw the foreground at its draggable position
+                downloadCtx.drawImage(foreground, foregroundX, foregroundY, foreground.width, foreground.height);
+            };
+        });
+
         // Start video stream
         async function startVideo() {
             video.srcObject = await navigator.mediaDevices.getUserMedia({video: true});
@@ -136,12 +215,6 @@
             }, 'image/png');
         }
 
-        // Receive processed frame
-        socket.on('processed_frame', (data) => {
-            const blob = new Blob([data], { type: 'image/png' });
-            foreground.src = URL.createObjectURL(blob);
-        });
-
         // Upload background
         backgroundInput.addEventListener('change', async (event) => {
             const file = event.target.files[0];
@@ -163,9 +236,11 @@
             if (capturing) {
                 // Start
                 startVideo();
+                startRecording();
                 captureInterval = setInterval(sendFrame, 50); // Adjust send rate
             } else {
                 clearInterval(captureInterval);
+                stopRecording();
                 endVideo();
             }
         });
