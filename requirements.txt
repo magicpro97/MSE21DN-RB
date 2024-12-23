@@ -5,3 +5,4 @@ onnxruntime
 rembg
 opencv-python
 Flask-SocketIO
+mediapipe
