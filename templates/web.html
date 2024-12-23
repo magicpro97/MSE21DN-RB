@@ -4,23 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Remove Background Realtime</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
             margin: 0;
             overflow: hidden;
-        }
-        video, img {
-            max-width: 100%;
-            border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-            margin-bottom: 20px;
-        }
-        .container {
-            position: relative;
-            width: 100vw;
-            height: 80vh;
-            margin-top: 20vh;
-            background-color: #f0f0f0;
         }
         #background {
             position: absolute;
@@ -33,163 +22,321 @@
         }
         #foreground {
             position: absolute;
-            top: 50%;
+            top: 35%;
             left: 50%;
-            transform: translate(-50%, -50%);
+            transform: translate(-35%, -50%);
             cursor: grab;
             z-index: 1;
         }
         #foreground:active {
             cursor: grabbing;
         }
-        button, input[type="file"] {
-            margin: 10px;
-            padding: 10px 20px;
-            font-size: 16px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: background-color 0.3s ease;
-        }
-        label {
-            font-size: 16px;
-            font-weight: bold;
-        }
-        button {
-            background-color: #007BFF;
-            color: white;
-        }
-        button:hover {
-            background-color: #0056b3;
-        }
-        input[type="file"] {
-            background-color: #f8f9fa;
-            color: #333;
-        }
     </style>
 </head>
 <body>
-    <h1 style="position: fixed; top: 0; left: 10px; text-align: center; width: 100%;">Realtime Background Removal</h1>
-    <div class="container">
-        <img id="background" src="" alt="Background">
-        <img id="foreground" src="" alt="Foreground">
-    </div>
-    <div style="position: fixed; top: 10vh; left: 10px;">
-        <label for="backgroundInput">Input Background Image:</label>
-        <input type="file" id="backgroundInput" accept="image/*">
-    </div>
-    <div style="position: fixed; top: 10vh; right: 10px; display: flex; flex-direction: row; align-items: center;">
-        <button id="toggleCapture">Start Capture</button>
-        <button id="download">Download Processed Video</button>
-    </div>
+    <div id="app" class="relative bg-slate-600">
+        <h1 class="hidden">Realtime Background Removal</h1>
+        <div
+          class="w-screen fixed top-0 left-0 flex gap-3 justify-center items-center p-2 z-10 flex-1"
+        >
+          <label
+            for="backgroundInput"
+            class="h-full bg-blue-500 text-white rounded hover:bg-blue-600 aspect-video flex justify-center items-center text-center w-[180px] border-2 border-slate-400 hover:border-slate-900"
+          >
+            <!-- <span v-if="bgData"></span>
+              <span v-else> + </span> -->
+            Select<br />Background
+          </label>
+          <button
+            @click="setBg('/static/pexels-karlsolano-2883049.jpg')"
+            class="h-full overflow-hidden bg-blue-500 text-white rounded hover:bg-blue-600 aspect-video flex justify-center items-center text-center w-[180px] border-2 border-slate-400 hover:border-slate-900"
+          >
+            <img
+              class="w-full overflow-hidden"
+              src="http://localhost:5000/static/pexels-karlsolano-2883049.jpg"
+            />
+          </button>
+          <button
+            @click="setBg('/static/vecteezy_ai-generated-a-modern-interior-design-background-clean_35796521.jpg')"
+            class="h-full overflow-hidden bg-blue-500 text-white rounded hover:bg-blue-600 aspect-video flex justify-center items-center text-center w-[180px] border-2 border-slate-400 hover:border-slate-900"
+          >
+            <img
+              class="w-full overflow-hidden"
+              src="http://localhost:5000/static/vecteezy_ai-generated-a-modern-interior-design-background-clean_35796521.jpg"
+            />
+          </button>
+          <button
+            @click="setBg('/static/615.jpg')"
+            class="h-full overflow-hidden bg-blue-500 text-white rounded hover:bg-blue-600 aspect-video flex justify-center items-center text-center w-[180px] border-2 border-slate-400 hover:border-slate-900"
+          >
+            <img class="w-full overflow-hidden" src="http://localhost:5000/static/615.jpg" />
+          </button>
+          <button id="toggleCapture"
+            class="h-full bg-blue-500 text-white rounded hover:bg-blue-600 aspect-video flex justify-center items-center text-center w-[180px]"
+            >Start Capture</button>
+            <a id="download"
+                class="h-full bg-blue-500 text-white rounded hover:bg-blue-600 aspect-video flex justify-center items-center text-center w-[180px]"
+                style="display: none;"
+                >
+                Download Processed Video
+            </a>
+        </div>
+        <div class="w-screen h-screen flex justify-center items-center">
+          <div
+            class="rounded-2xl border-4 border-slate-900 w-full h-full bg-white"
+          >
+            <img
+              id="background"
+              style="opacity: 0%"
+              src=""
+              class="block"
+              alt="Background"
+            />
+            <img id="foreground" src="" alt="Foreground" />
+          </div>
+        </div>
+        <input
+          type="file"
+          id="backgroundInput"
+          accept="image/*"
+          class="hidden border border-gray-300 rounded px-4 py-2"
+        />
+      </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.js"></script>
     <script>
-        const video = document.createElement('video'); // Hidden video element
-        const canvas = document.createElement('canvas'); // Hidden canvas element
-        const ctx = canvas.getContext('2d');
-        const background = document.getElementById('background');
-        const foreground = document.getElementById('foreground');
-        const backgroundInput = document.getElementById('backgroundInput');
-        const downloadButton = document.getElementById('download');
-        const toggleCaptureButton = document.getElementById('toggleCapture');
-        const socket = io('http://127.0.0.1:5000'); // WebSocket connection
+      let start;
+      const { createApp } = Vue;
 
-        // Initialize dragging state
-        let isDragging = false;
-        let dragStartX = 0, dragStartY = 0;
-        let foregroundX = 0, foregroundY = 0;
+      createApp({
+        data() {
+          return {
+            isDragging: false,
+            dragStartX: 0,
+            dragStartY: 0,
+            foregroundX: 0,
+            foregroundY: 0,
+          };
+        },
+        mounted() {
+          this.startVideo();
+        },
+        methods: {
+          async startVideo() {
+            const video = document.createElement('video'); // Hidden video element
+            const canvas = document.createElement('canvas'); // Hidden canvas element
+            const ctx = canvas.getContext('2d');
+            const background = document.getElementById('background');
+            const foreground = document.getElementById('foreground');
+            const backgroundInput = document.getElementById('backgroundInput');
+            const downloadButton = document.getElementById('download');
+            const toggleCaptureButton = document.getElementById('toggleCapture');
+            const socket = io('http://127.0.0.1:5000'); // WebSocket connection
 
-        // Start video stream
-        async function startVideo() {
-            video.srcObject = await navigator.mediaDevices.getUserMedia({video: true});
-            video.play();
-        }
+            // Initialize dragging state
+            let isDragging = false;
+            let dragStartX = 0, dragStartY = 0;
+            let foregroundX = 0, foregroundY = 0;
 
-        // End video from webcam
-        function endVideo() {
-            const stream = video.srcObject;
-            const tracks = stream.getTracks();
+            const downloadCanvas = document.createElement('canvas'); // Hidden canvas element
+            const downloadCtx = downloadCanvas.getContext('2d');
+            let chunks = [];
+            let mediaRecorder;
 
-            tracks.forEach(function(track) {
-                track.stop();
+            document.addEventListener('DOMContentLoaded', () => {
+                initializeForegroundPosition();
             });
 
-            video.srcObject = null;
-        }
+            // Function to initialize foreground position based on CSS
+            function initializeForegroundPosition() {
+                const rect = foreground.getBoundingClientRect();
+                const parentRect = foreground.parentElement.getBoundingClientRect();
 
-        // Send frame to server
-        async function sendFrame() {
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
+                // Calculate initial X and Y in relation to the parent container
+                foregroundX = rect.left - parentRect.left;
+                foregroundY = rect.top - parentRect.top;
 
-            // Draw current frame on canvas
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-            // Convert frame to Blob and send via WebSocket
-            canvas.toBlob((blob) => {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    socket.emit('frame', { frame: reader.result });
-                };
-                reader.readAsArrayBuffer(blob);
-            }, 'image/png');
-        }
-
-        // Receive processed frame
-        socket.on('processed_frame', (data) => {
-            const blob = new Blob([data], { type: 'image/png' });
-            foreground.src = URL.createObjectURL(blob);
-        });
-
-        // Upload background
-        backgroundInput.addEventListener('change', async (event) => {
-            const file = event.target.files[0];
-            background.src = URL.createObjectURL(file);
-            alert('Background uploaded successfully');
-        });
-
-        // Download processed video
-        downloadButton.addEventListener('click', () => {
-            window.location.href = 'http://127.0.0.1:5000/download-video';
-        });
-        let capturing = false;
-        let captureInterval;
-        // Toggle video capture
-        toggleCaptureButton.addEventListener('click', () => {
-            capturing = !capturing;
-            toggleCaptureButton.textContent = capturing ? 'Stop Capture' : 'Start Capture';
-            video.style.display = capturing ? 'block' : 'none';
-            if (capturing) {
-                // Start
-                startVideo();
-                captureInterval = setInterval(sendFrame, 50); // Adjust send rate
-            } else {
-                clearInterval(captureInterval);
-                endVideo();
-            }
-        });
-
-        // Handle dragging
-        foreground.addEventListener('mousedown', (event) => {
-            isDragging = true;
-            dragStartX = event.clientX - foregroundX;
-            dragStartY = event.clientY - foregroundY;
-        });
-
-        window.addEventListener('mousemove', (event) => {
-            if (isDragging) {
-                foregroundX = event.clientX - dragStartX;
-                foregroundY = event.clientY - dragStartY;
-
+                // Set the foreground's inline styles to match these calculated values
                 foreground.style.left = `${foregroundX}px`;
                 foreground.style.top = `${foregroundY}px`;
+                foreground.style.transform = 'none'; // Disable the translate(-50%, -50%) CSS transform
             }
-        });
 
-        window.addEventListener('mouseup', () => {
-            isDragging = false;
-        });
+            // Set up MediaRecorder
+            function setupMediaRecorder() {
+                const stream = downloadCanvas.captureStream(); // Capture the canvas as a media stream
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+                chunks = [];
+                mediaRecorder.start();
+
+                mediaRecorder.ondataavailable = (event) => {
+                    console.log('Data available:', event.data);
+                    if (event.data.size > 0) {
+                        chunks.push(event.data);
+                        console.log(chunks);
+                    }
+                };
+
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'video/webm' });
+                    const url = URL.createObjectURL(blob);
+                    downloadButton.href = url;
+                    downloadButton.download = 'video.webm';
+                    downloadButton.style.display = 'flex';
+                };
+            }
+
+            // Start recording
+            function startRecording() {
+                downloadCanvas.width = background.width; // Match the canvas size to the img size
+                downloadCanvas.height = background.height;
+                setupMediaRecorder();
+                
+            }
+
+            // Stop recording
+            function stopRecording() {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    setTimeout(() => {
+                        alert("Download video available")
+                        mediaRecorder.stop();
+                    }, 5000);
+                }
+            }
+
+            // Handle socket frame data
+            socket.on('processed_frame', (data) => {
+                const blob = new Blob([data], { type: 'image/png' });
+                const url = URL.createObjectURL(blob);
+
+                foreground.src = url;
+                foreground.onload = () => {
+                    downloadCtx.clearRect(0, 0, downloadCanvas.width, downloadCanvas.height); // Clear the canvas
+                    downloadCanvas.width = background.width;
+                    downloadCanvas.height = background.height;
+                    // Draw the background
+                    downloadCtx.drawImage(background, 0, 0, downloadCanvas.width, downloadCanvas.height);
+                    
+                    // Draw the foreground at its draggable position
+                    downloadCtx.drawImage(foreground, foregroundX, foregroundY, foreground.width, foreground.height);
+                    const dataUrl = downloadCanvas.toDataURL();
+                    console.log(dataUrl);
+                };
+            });
+
+            // Start video stream
+            async function startRecordingVideo() {
+                downloadButton.style.display = 'none';
+                video.srcObject = await navigator.mediaDevices.getUserMedia({video: true});
+                video.play();
+            }
+
+            // End video from webcam
+            function endRecordingVideo() {
+                const stream = video.srcObject;
+                const tracks = stream.getTracks();
+
+                tracks.forEach(function(track) {
+                    track.stop();
+                });
+
+                video.srcObject = null;
+            }
+
+            backgroundInput.addEventListener("change", (event) => {
+                const file = event.target.files[0];
+                background.src = URL.createObjectURL(file);
+                background.style = "";
+                alert("Background uploaded successfully");
+            });
+            // const downloadButton = document.getElementById("download");
+
+            // Function to handle frame updates
+            function onVideoFrame(timestamp) {
+                // Resize canvas to match video dimensions
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+
+                // Draw current frame to canvas
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                if (!start) {
+                    start = timestamp;
+                }
+                const elapsed = timestamp - start;
+                const shift = Math.min(0.1 * elapsed, 200);
+                if (shift < 200000 && shift > 1000 / 24) {
+                    //   Send the frame via WebSocket or update an image element
+                    canvas.toBlob((blob) => {
+                    if (blob) {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                        socket.emit("frame", { frame: reader.result });
+                        };
+                        reader.readAsArrayBuffer(blob);
+                    }
+                    }, "image/png");
+
+                    start = timestamp;
+                }
+
+                // Request the next frame
+                video.requestVideoFrameCallback(onVideoFrame);
+            }
+
+            // Start processing video frames
+            video.addEventListener("play", () => {
+                video.requestVideoFrameCallback(onVideoFrame);
+            });
+            
+            let capturing = false;
+            let captureInterval;
+            // Toggle video capture
+            toggleCaptureButton.addEventListener('click', () => {
+                capturing = !capturing;
+                toggleCaptureButton.textContent = capturing ? 'Stop Capture' : 'Start Capture';
+                video.style.display = capturing ? 'block' : 'none';
+                if (capturing) {
+                    // Start
+                    startRecordingVideo();
+                    startRecording();
+                } else {
+                    clearInterval(captureInterval);
+                    stopRecording();
+                    endRecordingVideo();
+                }
+            });
+
+            // Handle dragging
+            foreground.addEventListener('mousedown', (event) => {
+                isDragging = true;
+                dragStartX = event.clientX - foregroundX;
+                dragStartY = event.clientY - foregroundY;
+            });
+
+            window.addEventListener('mousemove', (event) => {
+                if (isDragging) {
+                    foregroundX = event.clientX - dragStartX;
+                    foregroundY = event.clientY - dragStartY;
+
+                    foreground.style.left = `${foregroundX}px`;
+                    foreground.style.top = `${foregroundY}px`;
+                }
+            });
+
+            window.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+          },
+
+          setBg: (src) => {
+            const background = document.getElementById("background");
+            background.src = src;
+            background.style = "";
+            alert("Choose background successfully");
+          },
+        },
+      }).mount("#app");
     </script>
 </body>
 </html>
